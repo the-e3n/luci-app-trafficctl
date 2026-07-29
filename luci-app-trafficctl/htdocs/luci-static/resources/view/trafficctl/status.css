@@ -71,8 +71,32 @@
 }
 
 /* ── Speed indicator in table ────────────────────────────────────── */
+.tc-speed-cell {
+    transition: color 0.25s ease, opacity 0.2s ease;
+}
+.tc-speed-cell.tc-speed-flash {
+    opacity: 0.45;
+}
+.tc-spark-cell svg polyline {
+    transition: opacity 0.2s ease;
+}
 .tc-speed-active { color: var(--tc-speed); font-weight: 600; }
 .tc-speed-idle   { color: var(--tc-faint); }
+.tc-num-input {
+    width: 52px;
+    margin-left: 4px;
+    padding: 2px 5px;
+    font-size: 11px;
+    border: 1px solid var(--tc-border, rgba(128,128,128,.35));
+    border-radius: 4px;
+    background: var(--tc-bg, transparent);
+    color: inherit;
+    vertical-align: middle;
+}
+.tc-num-input:focus {
+    outline: none;
+    border-color: var(--tc-speed);
+}
 
 /* ── Inline badge (block/limit/shape status in cell) ─────────────── */
 .tc-badge {
