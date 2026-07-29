@@ -897,7 +897,7 @@ function setStatus(el, type, msg) {
 	el.innerHTML = type === 'loading' ? '<span class="tc-spinner"></span>'+escHtml(msg) : escHtml(msg);
 }
 
-function updateUrlParams(opts) {
+function buildUrlFromOpts(opts) {
 	var params = new URLSearchParams();
 	if (opts.lastIp && opts.lastIp !== '__all__') params.set('ip', opts.lastIp);
 	if (opts.refresh && opts.refresh > 0) params.set('refresh', String(opts.refresh));
@@ -906,8 +906,21 @@ function updateUrlParams(opts) {
 	if (opts.avgMethod && opts.avgMethod !== 'simple') params.set('method', opts.avgMethod);
 	if (opts.extendedStats) params.set('extended', '1');
 	if (opts.rdns) params.set('rdns', '1');
-	var newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
-	history.replaceState(null, '', newUrl);
+	return window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+}
+
+function updateUrlParams(opts) {
+	var newUrl = buildUrlFromOpts(opts);
+	var curUrl = window.location.pathname + window.location.search;
+	if (newUrl === curUrl) return;
+
+	var oldIp = new URLSearchParams(window.location.search).get('ip') || '';
+	var newIp = (opts.lastIp && opts.lastIp !== '__all__') ? opts.lastIp : '';
+	if (oldIp !== newIp) {
+		history.pushState(null, '', newUrl);
+	} else {
+		history.replaceState(null, '', newUrl);
+	}
 }
 
 function applyUrlParams(opts) {
@@ -2299,6 +2312,37 @@ return view.extend({
 		};
 
 		this._setupTimer();
+
+		function syncFromHistory() {
+			var o = loadOpts();
+			var paramIp = new URLSearchParams(window.location.search).get('ip');
+			o.lastIp = paramIp || '__all__';
+			o = applyUrlParams(o);
+			saveOpts(o);
+			var ip = o.lastIp || '__all__';
+			if (ip === '__all__') {
+				searchSelect.setValue('__all__', '');
+			} else {
+				var matchDev = devices.filter(function(d) { return d.ip === ip; })[0];
+				var lbl = matchDev ? matchDev.name + '  —  ' + ip : ip;
+				searchSelect.setValue(ip, lbl);
+			}
+			renderRecentChips();
+			updateModeUI();
+			if (ip === '__all__') {
+				deviceGraphDiv.classList.add('tc-hidden');
+				runAll();
+			} else {
+				self._stopBytesPoll();
+				pollDrops();
+				runSingle(ip);
+			}
+			updateExtendedStats();
+		}
+
+		self._popstateHandler = function() { syncFromHistory(); };
+		window.addEventListener('popstate', self._popstateHandler);
+
 		setTimeout(function() { runQuery(); }, 0);
 
 		var savedHidden = opts.hiddenCols || {};
@@ -3078,5 +3122,9 @@ return view.extend({
 	handleTeardown: function() {
 		if (this._timer) { clearInterval(this._timer); this._timer = null; }
 		this._stopBytesPoll && this._stopBytesPoll();
+		if (this._popstateHandler) {
+			window.removeEventListener('popstate', this._popstateHandler);
+			this._popstateHandler = null;
+		}
 	}
 });
