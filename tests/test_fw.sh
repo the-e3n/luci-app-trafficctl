@@ -85,6 +85,12 @@ assert_eq "offload_mode: hardware (no counter flag in flowtable)" \
 assert_eq "offload_mode: hardware-counter (counter flag present)" \
     "hardware-counter" "$(_offload_mode 0 1 "flowtable ft { flags { offload, counter }; devices = { eth0 }; }")"
 
+# --- tctl_mwan3_id2mask (mwan3 mark encoding) ---
+
+assert_eq "mwan3 mark id=1" "0x100" "$(tctl_mwan3_id2mask 1 0x3F00)"
+assert_eq "mwan3 mark id=2" "0x200" "$(tctl_mwan3_id2mask 2 0x3F00)"
+assert_eq "mwan3 mark id=3" "0x300" "$(tctl_mwan3_id2mask 3 0x3F00)"
+
 # --- Results ---
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"

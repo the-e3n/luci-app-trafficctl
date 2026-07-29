@@ -151,6 +151,67 @@ tctl_get_lan_devices() {
     tctl_lan_subnets | awk '{print $1}' | sort -u
 }
 
+# Map kernel netdev → UCI network name for masqueraded (WAN) zones.
+# One line per mapping: "netdev logical_name"
+tctl_wan_netdev_map() {
+    local i=0 zname zmasq nets net st l3 dev
+    while zname=$(uci -q get "firewall.@zone[$i].name" 2>/dev/null); [ -n "$zname" ]; do
+        zmasq=$(uci -q get "firewall.@zone[$i].masq" 2>/dev/null)
+        nets=$(uci -q get "firewall.@zone[$i].network" 2>/dev/null)
+        i=$((i + 1))
+        [ "$zmasq" = "1" ] || continue
+        case "$zname" in *6) continue ;; esac
+        for net in $nets; do
+            st=$(ubus call "network.interface.$net" status 2>/dev/null)
+            l3=$(echo "$st" | jsonfilter -e '@.l3_device' 2>/dev/null)
+            dev=$(echo "$st" | jsonfilter -e '@.device' 2>/dev/null)
+            [ -n "$l3" ] && printf '%s %s\n' "$l3" "$net"
+            [ -n "$dev" ] && [ "$dev" != "$l3" ] && printf '%s %s\n' "$dev" "$net"
+        done
+    done
+}
+
+# mwan3 mark encoding (same bit-spread as mwan3_id2mask in net/mwan3).
+tctl_mwan3_id2mask() {
+    local id="$1" mask="$2" bit_msk=0 bit_val=0 result=0
+    id=$((id))
+    mask=$((mask))
+    while [ "$bit_msk" -le 31 ]; do
+        if [ $(((mask >> bit_msk) & 1)) -eq 1 ]; then
+            if [ $(((id >> bit_val) & 1)) -eq 1 ]; then
+                result=$((result | (1 << bit_msk)))
+            fi
+            bit_val=$((bit_val + 1))
+        fi
+        bit_msk=$((bit_msk + 1))
+    done
+    printf '0x%x' "$result"
+}
+
+# Map mwan3 connmark → interface section name. One line: "0xNNN iface"
+tctl_mwan3_mark_map() {
+    [ -f /etc/config/mwan3 ] || return 0
+    local mmx_mask id=1 sec enabled mark state_id
+    mmx_mask=$(cat /var/run/mwan3/mmx_mask 2>/dev/null)
+    [ -z "$mmx_mask" ] && mmx_mask=$(uci -q get mwan3.globals.mmx_mask 2>/dev/null)
+    [ -z "$mmx_mask" ] && mmx_mask=0x3F00
+    for sec in $(uci -q show mwan3 2>/dev/null | sed -n "s/^mwan3\.\([^=]*\)=interface$/\1/p"); do
+        enabled=$(uci -q get "mwan3.$sec.enabled" 2>/dev/null)
+        [ "$enabled" = "1" ] || continue
+        state_id=$(uci -q -c /var/state get "mwan3.$sec.iface_id" 2>/dev/null)
+        if [ -n "$state_id" ]; then
+            mark=$(tctl_mwan3_id2mask "$state_id" "$mmx_mask")
+        else
+            mark=$(tctl_mwan3_id2mask "$id" "$mmx_mask")
+            id=$((id + 1))
+        fi
+        _hex=$(echo "$mark" | tr 'A-F' 'a-f')
+        _dec=$((mark))
+        printf '%s %s\n' "$_hex" "$sec"
+        [ "$_dec" != "$_hex" ] && printf '%s %s\n' "$_dec" "$sec"
+    done
+}
+
 tctl_validate_ip() {
     echo "$1" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' || return 1
     local IFS='.'
