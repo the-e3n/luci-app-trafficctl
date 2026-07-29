@@ -196,7 +196,8 @@ var GROUP_OPTS = [
 	{v:'host',    l: _('Hostname / Dst IP')},
 	{v:'service', l: _('Service')},
 	{v:'port',    l: _('Port')},
-	{v:'proto',   l: _('Protocol')}
+	{v:'proto',   l: _('Protocol')},
+	{v:'wan',     l: _('WAN')}
 ];
 
 function loadOpts() {
@@ -618,6 +619,7 @@ function groupConnections(conns, groupBy) {
 		case 'service': keyFn = function(c){ return c.service || SERVICE_PORTS[c.port] || ('port '+c.port); }; break;
 		case 'port':    keyFn = function(c){ return String(c.port); }; break;
 		case 'proto':   keyFn = function(c){ return c.proto || '?'; }; break;
+		case 'wan':     keyFn = function(c){ return c.wan || '?'; }; break;
 		default:        return null;
 	}
 	var groups = {};
@@ -673,6 +675,7 @@ function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
 		{ key:'host',    label: _('Hostname'), num:false },
 		{ key:'port',    label: _('Port'),     num:true  },
 		{ key:'service', label: _('Service'),  num:false },
+		{ key:'wan',     label: _('WAN'),      num:false },
 		{ key:'bytes',   label: _('Bytes'),    num:true  },
 		{ key:'state',   label: _('State'),    num:false }
 	];
@@ -716,6 +719,7 @@ function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
 			host:    hostCell,
 			port:    E('div', { 'class': 'td tc-right tc-mono' }, String(r.port || '')),
 			service: E('div', { 'class': 'td tc-c-speed' }, escHtml(r.service || (SERVICE_PORTS[r.port]||''))),
+			wan:     E('div', { 'class': 'td tc-c-speed' }, escHtml(r.wan || '—')),
 			bytes:   E('div', { 'class': 'td tc-right tc-mono tc-fw-bold' }, fmtBytes(r.bytes)),
 			state:   E('div', { 'class': 'td tc-fw-bold' + scCls }, state)
 		};
@@ -893,7 +897,7 @@ function setStatus(el, type, msg) {
 	el.innerHTML = type === 'loading' ? '<span class="tc-spinner"></span>'+escHtml(msg) : escHtml(msg);
 }
 
-function updateUrlParams(opts) {
+function buildUrlFromOpts(opts) {
 	var params = new URLSearchParams();
 	if (opts.lastIp && opts.lastIp !== '__all__') params.set('ip', opts.lastIp);
 	if (opts.refresh && opts.refresh > 0) params.set('refresh', String(opts.refresh));
@@ -902,8 +906,21 @@ function updateUrlParams(opts) {
 	if (opts.avgMethod && opts.avgMethod !== 'simple') params.set('method', opts.avgMethod);
 	if (opts.extendedStats) params.set('extended', '1');
 	if (opts.rdns) params.set('rdns', '1');
-	var newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
-	history.replaceState(null, '', newUrl);
+	return window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+}
+
+function updateUrlParams(opts) {
+	var newUrl = buildUrlFromOpts(opts);
+	var curUrl = window.location.pathname + window.location.search;
+	if (newUrl === curUrl) return;
+
+	var oldIp = new URLSearchParams(window.location.search).get('ip') || '';
+	var newIp = (opts.lastIp && opts.lastIp !== '__all__') ? opts.lastIp : '';
+	if (oldIp !== newIp) {
+		history.pushState(null, '', newUrl);
+	} else {
+		history.replaceState(null, '', newUrl);
+	}
 }
 
 function applyUrlParams(opts) {
@@ -2295,6 +2312,37 @@ return view.extend({
 		};
 
 		this._setupTimer();
+
+		function syncFromHistory() {
+			var o = loadOpts();
+			var paramIp = new URLSearchParams(window.location.search).get('ip');
+			o.lastIp = paramIp || '__all__';
+			o = applyUrlParams(o);
+			saveOpts(o);
+			var ip = o.lastIp || '__all__';
+			if (ip === '__all__') {
+				searchSelect.setValue('__all__', '');
+			} else {
+				var matchDev = devices.filter(function(d) { return d.ip === ip; })[0];
+				var lbl = matchDev ? matchDev.name + '  —  ' + ip : ip;
+				searchSelect.setValue(ip, lbl);
+			}
+			renderRecentChips();
+			updateModeUI();
+			if (ip === '__all__') {
+				deviceGraphDiv.classList.add('tc-hidden');
+				runAll();
+			} else {
+				self._stopBytesPoll();
+				pollDrops();
+				runSingle(ip);
+			}
+			updateExtendedStats();
+		}
+
+		self._popstateHandler = function() { syncFromHistory(); };
+		window.addEventListener('popstate', self._popstateHandler);
+
 		setTimeout(function() { runQuery(); }, 0);
 
 		var savedHidden = opts.hiddenCols || {};
@@ -2328,7 +2376,8 @@ return view.extend({
 		var connColDefs = [
 			{key:'proto', label:_('Proto')}, {key:'dst', label:_('Dst IP')},
 			{key:'host', label:_('Hostname')}, {key:'port', label:_('Port')},
-			{key:'service', label:_('Service')}, {key:'bytes', label:_('Bytes')},
+			{key:'service', label:_('Service')}, {key:'wan', label:_('WAN')},
+			{key:'bytes', label:_('Bytes')},
 			{key:'state', label:_('State')}
 		];
 		var savedConnHidden = opts.connHiddenCols || {};
@@ -3073,5 +3122,9 @@ return view.extend({
 	handleTeardown: function() {
 		if (this._timer) { clearInterval(this._timer); this._timer = null; }
 		this._stopBytesPoll && this._stopBytesPoll();
+		if (this._popstateHandler) {
+			window.removeEventListener('popstate', this._popstateHandler);
+			this._popstateHandler = null;
+		}
 	}
 });

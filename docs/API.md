@@ -126,6 +126,7 @@ Returns detailed connection information for a single device.
       "host": "",
       "port": 443,
       "service": "https",
+      "wan": "wan",
       "bytes": 17261,
       "state": "ESTABLISHED"
     }

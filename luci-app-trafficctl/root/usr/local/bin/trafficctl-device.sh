@@ -232,8 +232,51 @@ CW=$(echo "$META_LINE" | awk '{print $8}')
 [ -z "$SS" ] && SS=0
 [ -z "$CW" ] && CW=0
 
+# WAN interface lookup maps for per-connection oifname / mwan3 mark resolution
+TCTL_NETDEV_MAP=""
+TCTL_MARK_MAP=""
+_dev=""
+_name=""
+while read -r _dev _name; do
+    [ -z "$_dev" ] || [ -z "$_name" ] && continue
+    case "$_dev$_name" in *[,:]* ) continue ;; esac
+    if [ -n "$TCTL_NETDEV_MAP" ]; then TCTL_NETDEV_MAP="$TCTL_NETDEV_MAP,"; fi
+    TCTL_NETDEV_MAP="${TCTL_NETDEV_MAP}${_dev}:${_name}"
+done <<EOF
+$(tctl_wan_netdev_map)
+EOF
+_mark=""
+while read -r _mark _name; do
+    [ -z "$_mark" ] || [ -z "$_name" ] && continue
+    case "$_mark$_name" in *[,:]* ) continue ;; esac
+    if [ -n "$TCTL_MARK_MAP" ]; then TCTL_MARK_MAP="$TCTL_MARK_MAP,"; fi
+    TCTL_MARK_MAP="${TCTL_MARK_MAP}${_mark}:${_name}"
+done <<EOF
+$(tctl_mwan3_mark_map)
+EOF
+
 # Build connections JSON array
-CONNS_OUT=$(echo "$CONNTRACK_DATA" | awk -v ip="$IP" -v pf="$PROTO_FILTER" '
+CONNS_OUT=$(echo "$CONNTRACK_DATA" | awk -v ip="$IP" -v pf="$PROTO_FILTER" \
+    -v netdev_map="$TCTL_NETDEV_MAP" -v mark_map="$TCTL_MARK_MAP" '
+function resolve_wan(oif, mark,    parts, i, n, kv, mkey) {
+    mkey = mark
+  if (mkey != "" && mkey != "0" && mkey != "0x0") {
+    n = split(mark_map, parts, ",")
+    for (i = 1; i <= n; i++) {
+      split(parts[i], kv, ":")
+      if (kv[1] == mkey) return kv[2]
+    }
+  }
+  if (oif != "") {
+    n = split(netdev_map, parts, ",")
+    for (i = 1; i <= n; i++) {
+      split(parts[i], kv, ":")
+      if (kv[1] == oif) return kv[2]
+    }
+    return oif
+  }
+  return ""
+}
 BEGIN { n=0 }
 {
     proto=""
@@ -244,7 +287,7 @@ BEGIN { n=0 }
     }
     if (pf != "all" && proto != pf) next
 
-    dst=""; dport=""; bytes=0; state=""
+    dst=""; dport=""; bytes=0; state=""; oif=""; mark=""
     src_key = "src=" ip
     seen_src=0; got_dst=0
     for (i=1; i<=NF; i++) {
@@ -258,6 +301,11 @@ BEGIN { n=0 }
         else if ($i == "SYN_SENT") state="SYN_SENT"
         else if ($i == "CLOSE_WAIT") state="CLOSE_WAIT"
         else if ($i == "FIN_WAIT") state="FIN_WAIT"
+        if (index($i, "oifname=") == 1 && oif == "") oif=substr($i, 9)
+        if (index($i, "mark=") == 1 && mark == "") {
+            mark=substr($i, 6)
+            if (index(mark, "0x") == 1 || index(mark, "0X") == 1) mark=tolower(mark)
+        }
     }
     if (dst == "" || dst == ip) next
     if (dport == "") dport = "0"
@@ -276,7 +324,8 @@ BEGIN { n=0 }
     else if (dport == "8080") svc="http-alt"
 
     if (n > 0) printf ","
-    printf "{\"proto\":\"%s\",\"dst\":\"%s\",\"host\":\"\",\"port\":%s,\"service\":\"%s\",\"bytes\":%d,\"state\":\"%s\"}", proto, dst, dport, svc, bytes, state
+    wan = resolve_wan(oif, mark)
+    printf "{\"proto\":\"%s\",\"dst\":\"%s\",\"host\":\"\",\"port\":%s,\"service\":\"%s\",\"wan\":\"%s\",\"bytes\":%d,\"state\":\"%s\"}", proto, dst, dport, svc, wan, bytes, state
     n++
 }
 ')

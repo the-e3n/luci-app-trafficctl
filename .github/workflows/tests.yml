@@ -28,6 +28,8 @@ jobs:
         run: bash tests/test_telegram_e2e.sh
       - name: Security tests
         run: bash tests/test_security.sh
+      - name: Device WAN interface tests
+        run: bash tests/test_device_wan.sh
       - name: IPK build test
         run: bash tests/test_build_ipk.sh
 
