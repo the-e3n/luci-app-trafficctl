@@ -72,10 +72,15 @@
 
 /* ── Speed indicator in table ────────────────────────────────────── */
 .tc-speed-cell {
-    transition: color 0.25s ease, opacity 0.2s ease;
+    transition: color 0.25s ease;
 }
-.tc-speed-cell.tc-speed-flash {
-    opacity: 0.45;
+.tc-col-dl-speed {
+    min-width: 96px;
+    white-space: nowrap;
+}
+.tc-col-bytes {
+    min-width: 80px;
+    white-space: nowrap;
 }
 .tc-spark-cell svg polyline {
     transition: opacity 0.2s ease;
@@ -83,7 +88,7 @@
 .tc-speed-active { color: var(--tc-speed); font-weight: 600; }
 .tc-speed-idle   { color: var(--tc-faint); }
 .tc-num-input {
-    width: 52px;
+    width: 56px;
     margin-left: 4px;
     padding: 2px 5px;
     font-size: 11px;

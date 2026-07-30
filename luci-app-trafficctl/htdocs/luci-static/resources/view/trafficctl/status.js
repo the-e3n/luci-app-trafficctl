@@ -215,7 +215,8 @@ function fmtBytes(b) {
 	return (b/1073741824).toFixed(2) + ' GB';
 }
 function fmtSpeed(bps) {
-	if (!bps || bps < 1) return '—';
+	if (bps == null || isNaN(bps)) return '—';
+	if (bps < 1) return '0 bit/s';
 	var bits = bps * 8;
 	if (bits < 1000) return bits.toFixed(0) + ' bit/s';
 	if (bits < 1000000) { var k = bits/1000; return (k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)) + ' Kbit/s'; }
@@ -232,6 +233,12 @@ function parsePollSec(v) {
 	var n = parseFloat(v);
 	if (isNaN(n) || n < 0) return 0;
 	return n;
+}
+function speedDisplayBps(sd) {
+	if (!sd) return 0;
+	if (sd.current >= 1) return sd.current;
+	if (sd.avg >= 1) return sd.avg;
+	return sd.current;
 }
 function escHtml(s) {
 	return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -861,6 +868,8 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		var arrow = c.key === sortCol ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 		var compact = c.key === '_spark' || c.key === '_throttle_kbit' || c.key === '_drop_packets' || c.key === '_backlog';
 		var style = (c.key === '_spark' ? 'cursor:default;width:68px;' : '') + (compact ? 'white-space:nowrap;width:1%;' : '');
+		if (c.key === '_speed') style += 'min-width:96px;width:96px;';
+		if (c.key === 'total' || c.key === 'tcp' || c.key === 'udp') style += 'min-width:80px;';
 		var attrs = { 'class': 'th', 'style': style || undefined, 'data-col': c.key, 'data-num': c.num ? '1' : '0' };
 		if (c.tip) attrs['data-tip'] = c.tip;
 		var label = c.label + arrow;
@@ -880,19 +889,20 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		var macEl = r.mac ? E('a', { 'href':'/cgi-bin/luci/admin/network/dhcp','target':'_blank','rel':'noopener','class':'tc-link','title':_('Open DHCP/DNS bindings'),'onclick':'event.stopPropagation()' }, r.mac) : '';
 		cellMap.mac  = E('div', { 'class': 'td tc-mono tc-sm tc-c-muted' }, macEl || '');
 
-		cellMap._speed = E('div', { 'class': 'td tc-right tc-mono tc-speed-cell', 'data-speed-ip': r.ip, 'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…') });
-		if (sd && sd.current > 1024) { cellMap._speed.className = 'td tc-right tc-mono tc-speed-cell tc-speed-active'; cellMap._speed.textContent = fmtSpeed(sd.current); }
-		else { cellMap._speed.className = 'td tc-right tc-mono tc-speed-cell tc-speed-idle'; cellMap._speed.textContent = sd ? fmtSpeed(sd.current) : '—'; }
+		cellMap._speed = E('div', { 'class': 'td tc-right tc-mono tc-speed-cell tc-col-dl-speed', 'data-speed-ip': r.ip, 'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…') });
+		var dispBps = speedDisplayBps(sd);
+		if (sd && dispBps > 1024) { cellMap._speed.className = 'td tc-right tc-mono tc-speed-cell tc-col-dl-speed tc-speed-active'; cellMap._speed.textContent = fmtSpeed(dispBps); }
+		else { cellMap._speed.className = 'td tc-right tc-mono tc-speed-cell tc-col-dl-speed tc-speed-idle'; cellMap._speed.textContent = sd ? fmtSpeed(dispBps) : '—'; }
 
 		var sparkTip = r._throttle_kbit > 0 ? (_('Limit') + ': ' + fmtRate(r._throttle_kbit)) : '';
 		cellMap._spark = E('div', { 'class': 'td tc-center tc-spark-cell', 'style': 'padding:2px 4px', 'data-spark-ip': r.ip, 'data-tip': sparkTip || undefined });
 		var sparkSvg = renderSparkline(speedHistory[r.ip], globalSpeedMax, 60, 20, r._throttle_kbit);
 		if (sparkSvg) cellMap._spark.appendChild(sparkSvg);
 
-		cellMap.conns = E('div', { 'class': 'td tc-right tc-fw-bold' }, String(r.conns||0));
-		cellMap.total = E('div', { 'class': 'td tc-right tc-mono tc-sm' }, fmtBytes(r.total||0));
-		cellMap.tcp   = E('div', { 'class': 'td tc-right tc-mono tc-sm tc-c-speed' }, fmtBytes(r.tcp||0));
-		cellMap.udp   = E('div', { 'class': 'td tc-right tc-mono tc-sm tc-c-warn' }, fmtBytes(r.udp||0));
+		cellMap.conns = E('div', { 'class': 'td tc-right tc-fw-bold', 'data-conns-ip': r.ip }, String(r.conns||0));
+		cellMap.total = E('div', { 'class': 'td tc-right tc-mono tc-sm tc-col-bytes', 'data-total-ip': r.ip }, fmtBytes(r.total||0));
+		cellMap.tcp   = E('div', { 'class': 'td tc-right tc-mono tc-sm tc-c-speed tc-col-bytes', 'data-tcp-ip': r.ip }, fmtBytes(r.tcp||0));
+		cellMap.udp   = E('div', { 'class': 'td tc-right tc-mono tc-sm tc-c-warn tc-col-bytes', 'data-udp-ip': r.ip }, fmtBytes(r.udp||0));
 
 		var inetBadge = r.blocked
 			? E('span', { 'class': 'tc-c-warn tc-fw-bold' }, '⏸ ' + _('blocked'))
@@ -941,7 +951,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		cellMap._backlog = E('div', { 'class': 'td tc-center', 'data-backlog-ip': r.ip }, backlogBadge);
 
 		var cells = visibleCols.map(function(c) { return cellMap[c.key]; });
-		var row = E('div', { 'class': 'tr', 'title': _('Click to inspect') + ' ' + r.name }, cells);
+		var row = E('div', { 'class': 'tr', 'data-row-ip': r.ip, 'title': _('Click to inspect') + ' ' + r.name }, cells);
 		row.addEventListener('click', function() { addRecentDevice(r.ip, r.name); onSelect(r.ip, r.name); });
 		return row;
 	});
@@ -1879,14 +1889,11 @@ return view.extend({
 				var s = self._speedMap[ip];
 				var cell = connsDiv.querySelector('[data-speed-ip="'+ip+'"]');
 				if (!cell) return;
-				var nextText = fmtSpeed(s.current);
-				var cls = 'td tc-right tc-mono tc-speed-cell ' + (s.current > 1024 ? 'tc-speed-active' : 'tc-speed-idle');
+				var dispBps = speedDisplayBps(s);
+				var nextText = fmtSpeed(dispBps);
+				var cls = 'td tc-right tc-mono tc-speed-cell tc-col-dl-speed ' + (dispBps > 1024 ? 'tc-speed-active' : 'tc-speed-idle');
 				if (cell.className !== cls) cell.className = cls;
-				if (cell.textContent !== nextText) {
-					cell.classList.add('tc-speed-flash');
-					cell.textContent = nextText;
-					setTimeout(function() { cell.classList.remove('tc-speed-flash'); }, 220);
-				}
+				if (cell.textContent !== nextText) cell.textContent = nextText;
 				cell.title = _('Avg')+': '+fmtSpeed(s.avg)+' / '+_('Max')+': '+fmtSpeed(s.max);
 
 				var sparkCell = connsDiv.querySelector('[data-spark-ip="'+ip+'"]');
@@ -1896,6 +1903,42 @@ return view.extend({
 					upsertSparkline(sparkCell, self._speedHistory[ip], globalMax, 60, 20, lk);
 				}
 			});
+		}
+
+		function updateTrafficCells() {
+			(self._lastRows || []).forEach(function(r) {
+				var ip = r.ip;
+				var el;
+				el = connsDiv.querySelector('[data-conns-ip="'+ip+'"]');
+				if (el) el.textContent = String(r.conns || 0);
+				el = connsDiv.querySelector('[data-total-ip="'+ip+'"]');
+				if (el) el.textContent = fmtBytes(r.total || 0);
+				el = connsDiv.querySelector('[data-tcp-ip="'+ip+'"]');
+				if (el) el.textContent = fmtBytes(r.tcp || 0);
+				el = connsDiv.querySelector('[data-udp-ip="'+ip+'"]');
+				if (el) el.textContent = fmtBytes(r.udp || 0);
+			});
+		}
+
+		function reorderRowsIfNeeded() {
+			if (self._sumCol !== '_speed') return;
+			var table = connsDiv.querySelector('.table.tc-table');
+			if (!table) return;
+			var titleRow = table.querySelector('.cbi-section-table-titles');
+			var rowEls = [];
+			var i;
+			for (i = 0; i < table.children.length; i++) {
+				var el = table.children[i];
+				if (el !== titleRow && el.classList && el.classList.contains('tr')) rowEls.push(el);
+			}
+			rowEls.sort(function(a, b) {
+				var ipA = a.getAttribute('data-row-ip');
+				var ipB = b.getAttribute('data-row-ip');
+				var sa = (self._speedMap[ipA] && self._speedMap[ipA].current) || 0;
+				var sb = (self._speedMap[ipB] && self._speedMap[ipB].current) || 0;
+				return self._sumDir === 'asc' ? sa - sb : sb - sa;
+			});
+			rowEls.forEach(function(r) { table.appendChild(r); });
 		}
 
 		function pollDrops() {
@@ -2044,11 +2087,15 @@ return view.extend({
 						time: now
 					};
 				});
-				if (self._sumCol === '_speed') {
-					renderSummary(self._lastRows, { silent: true });
-				} else {
-					updateSpeedCells();
+				return callTrafficctl();
+			}).then(function(rows) {
+				if (Array.isArray(rows)) {
+					self._lastRows = rows;
+					searchSelect.updateDevices(rows);
+					updateTrafficCells();
 				}
+				updateSpeedCells();
+				reorderRowsIfNeeded();
 				updateDeviceGraph();
 			}).catch(function(){});
 		}
